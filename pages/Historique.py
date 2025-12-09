@@ -15,6 +15,7 @@ games = (
     .select("id", "created_at")
     .eq("is_finished", True)
     .order("created_at", desc=True)
+    .limit(10)
     .execute()
 )
 
