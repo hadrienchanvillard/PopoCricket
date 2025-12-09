@@ -19,6 +19,7 @@ def get_leaderbord():
     client = get_client()
     return client.table("users").select("user_name", "user_points").order("user_points", desc=True).execute().data
 
+@st.cache_data
 def get_user_id(username: str):
     client = get_client()
     result = (
@@ -31,4 +32,19 @@ def get_user_id(username: str):
 
     if result.data:
         return result.data[0]["id"]
+    return None
+
+@st.cache_data
+def get_user_name(user_id):
+    client = get_client()
+    result = (
+        client
+        .table("users")
+        .select("user_name")
+        .eq("id", user_id)
+        .execute()
+    )
+
+    if result.data:
+        return result.data[0]["user_name"]
     return None

@@ -1,5 +1,5 @@
 import pandas as pd
-from utils import get_client, get_user_id
+from utils import get_client, get_user_id, get_user_name
 
 url_simple = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/simple.png"
 url_double = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/double.png"
@@ -21,6 +21,50 @@ def get_icon(n):
         case _:
             return url_blank
 
+
+def get_state_from_db(game_id):
+    client = get_client()
+    response_game_state = (client.table("game_state_history")
+                           .select("player_id", "target", "score")
+                           .eq("game_id", game_id)
+                           .execute())
+
+    player_ids = list({item["player_id"] for item in response_game_state.data})
+    player_list = [get_user_name(int(user_id)) for user_id in player_ids]
+
+    state = pd.DataFrame(
+            [
+                {name: 0 for name in player_list} for _ in range(7)
+            ],
+            index = targets
+        )
+
+    for data in response_game_state.data:
+        state.loc[data["target"], get_user_name(int(data["player_id"]))] = data["score"]
+
+    return state, player_list
+
+
+def get_points_from_db(game_id, player_list):
+    client = get_client()
+    response_player_points = (client.table("game_points_history")
+                           .select("player_id", "points")
+                           .eq("game_id", game_id)
+                           .execute())
+
+    player_points = pd.DataFrame(
+        [
+            {name: int(0) for name in player_list}
+        ],
+        index=["points"]
+    )
+
+    for data in response_player_points.data:
+        player_points.loc["points", get_user_name(int(data["player_id"]))] = data["points"]
+
+    return player_points
+
+
 class CricketGame:
 
     def create_game_in_base(self):
@@ -33,35 +77,41 @@ class CricketGame:
         except Exception as e:
             print(e)
 
-    def __init__(self, player_list):
+    def __init__(self, player_list=None, game_id=None):
 
-        self.id_game = self.create_game_in_base()
+        if player_list:
 
-        self.player_list = player_list
+            self.id_game = self.create_game_in_base()
+            self.player_list = player_list
+            self.multi = 1
+            self.total_dart_number = len(player_list) * num_darts_per_round * num_rounds
+            self.actual_dart = 1
 
-        self.actual_state = pd.DataFrame(
-            [
-                {name: 0 for name in player_list} for _ in range(7)
-            ],
-            index = targets
-        )
+            self.actual_state = pd.DataFrame(
+                [
+                    {name: 0 for name in player_list} for _ in range(7)
+                ],
+                index = targets
+            )
+            self.player_points = pd.DataFrame(
+                [
+                    {name: int(0) for name in player_list}
+                ],
+                index = ["points"]
+            )
 
-        self.player_points = pd.DataFrame(
-            [
-                {name: int(0) for name in player_list}
-            ],
-            index = ["points"]
-        )
+            self.state_history = {}
+            self.points_history = {}
 
-        self.multi = 1
+            self.game_ended = False
 
-        self.state_history = {}
-        self.points_history = {}
+        elif game_id:
 
-        self.total_dart_number = len(player_list) * num_darts_per_round * num_rounds
-        self.actual_dart = 1
+            self.actual_state, self.player_list = get_state_from_db(game_id)
+            self.player_points = get_points_from_db(game_id, self.player_list)
 
-        self.game_ended = False
+        else:
+            pass
 
     def print_state(self):
         print(self.actual_state)
@@ -131,15 +181,16 @@ class CricketGame:
 
             actual_player = self.get_actual_player()
 
-            # add points to other players
-            if self.get_cell(actual_player, target) + self.multi > 3:
-                added_points = int((self.get_cell(actual_player, target) + self.multi - 3) * int(target))
-                for other_player in self.player_list:
-                    if other_player != actual_player and  self.get_cell(other_player, target) < 3:
-                        self.add_points_to_player(other_player, added_points)
+            if target != "0":
+                # add points to other players
+                if self.get_cell(actual_player, target) + self.multi > 3:
+                    added_points = int((self.get_cell(actual_player, target) + self.multi - 3) * int(target))
+                    for other_player in self.player_list:
+                        if other_player != actual_player and  self.get_cell(other_player, target) < 3:
+                            self.add_points_to_player(other_player, added_points)
 
-            # update actual player score
-            self.set_cell(actual_player, target, min(self.get_cell(actual_player, target) + self.multi, 3))
+                # update actual player score
+                self.set_cell(actual_player, target, min(self.get_cell(actual_player, target) + self.multi, 3))
 
             self.multi=1
             self.actual_dart += 1
@@ -161,10 +212,24 @@ class CricketGame:
         client = get_client()
         for player in self.player_list:
             player_id = get_user_id(player)
+            points = self.player_points.loc["points", player].item()
+
+            try:
+                client.table("game_points_history").insert(
+                    [{
+                        "game_id": self.id_game,
+                        "player_id": player_id,
+                        "points": points,
+                    }], count="None"
+                ).execute()
+            except Exception as e:
+                print(e)
+
             for target in targets:
                 score = self.actual_state.loc[target, player].item()
+
                 try:
-                    response = client.table("game_state_history").insert(
+                    client.table("game_state_history").insert(
                         [{
                             "game_id": self.id_game,
                             "player_id": player_id,
@@ -180,7 +245,6 @@ class CricketGame:
             ).eq("id", self.id_game).execute()
         except Exception as e:
             print(e)
-
 
 
 # g=CricketGame(["paul", "max", "jean"])

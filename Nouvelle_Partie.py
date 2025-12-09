@@ -10,6 +10,20 @@ if "game" not in st.session_state:
     st.session_state.game_started = False
     st.session_state.game_ended = False
 
+if "save_done" not in st.session_state:
+    st.session_state.save_done = False
+
+def save_game():
+    game.state_to_base()
+    st.session_state.save_done = True
+    st.balloons()
+
+def new_game():
+    st.session_state.app_loaded = False
+    st.session_state.game_started = False
+    st.session_state.game_ended = False
+    st.session_state.save_done = False
+
 if not st.session_state.app_loaded:
     loading_placeholder = st.empty()
 
@@ -36,7 +50,7 @@ if not st.session_state.game_started:
         start_button = st.button("Commencer la partie", type="primary")
 
     if start_button and len(select_players) >= 2:
-        st.session_state.game = CricketGame(select_players)
+        st.session_state.game = CricketGame(player_list=select_players)
         st.session_state.game_started = True
         st.rerun()
     elif start_button:
@@ -68,7 +82,7 @@ else:
 
     container_points_2 = st.container(horizontal=True)
     with container_points_2:
-        targets = ["16", "15", "Bulle"]
+        targets = ["16", "15", "Bulle", "0"]
         for target in targets:
             target_num = "25" if target == "Bulle" else target
             st.button(target, use_container_width=True, type="secondary", on_click=game.throw, args=[target_num])
@@ -82,4 +96,15 @@ else:
     st.session_state.game_ended = game.game_ended
 
     if st.session_state.game_ended:
-        st.button("Enregistrer la partie", type="primary", on_click=game.state_to_base())
+        with st.container(horizontal=True):
+            st.button(
+                "Enregistrer la partie",
+                type="primary",
+                on_click=save_game,
+                disabled=st.session_state.save_done
+            )
+            st.button(
+                "Nouvelle Partie",
+                type="secondary",
+                on_click=new_game
+            )
