@@ -1,4 +1,5 @@
 import pandas as pd
+from utils import get_client, get_user_id
 
 url_simple = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/simple.png"
 url_double = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/double.png"
@@ -7,6 +8,7 @@ url_blank  = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/
 
 num_darts_per_round = 3
 num_rounds = 20
+targets = ["20", "19", "18", "17", "16", "15", "25"]
 
 def get_icon(n):
     match n:
@@ -21,7 +23,19 @@ def get_icon(n):
 
 class CricketGame:
 
+    def create_game_in_base(self):
+        client = get_client()
+        try:
+            response = client.table("games").insert(
+                [{"is_finished": False}], count="None"
+            ).execute()
+            return response.data[0]['id']
+        except Exception as e:
+            print(e)
+
     def __init__(self, player_list):
+
+        self.id_game = self.create_game_in_base()
 
         self.player_list = player_list
 
@@ -29,7 +43,7 @@ class CricketGame:
             [
                 {name: 0 for name in player_list} for _ in range(7)
             ],
-            index = ["20", "19", "18", "17", "16", "15", "25"]
+            index = targets
         )
 
         self.player_points = pd.DataFrame(
@@ -132,18 +146,41 @@ class CricketGame:
             self.game_ended = self.check_end_game()
 
     def get_df_to_print(self):
-        targets = ["20", "19", "18", "17", "16", "15", "25"]
-
         df_w_icon = pd.DataFrame(
             {
-                name: [get_icon(self.actual_state.loc[target, name]) for target in targets]
-                for name in self.player_list
+                player: [get_icon(self.actual_state.loc[target, player]) for target in targets]
+                for player in self.player_list
             },
             index=targets,
             dtype=object
         )
 
         return df_w_icon, self.player_points
+
+    def state_to_base(self):
+        client = get_client()
+        for player in self.player_list:
+            player_id = get_user_id(player)
+            for target in targets:
+                score = self.actual_state.loc[target, player].item()
+                try:
+                    response = client.table("game_state_history").insert(
+                        [{
+                            "game_id": self.id_game,
+                            "player_id": player_id,
+                            "target": target,
+                            "score": score
+                        }], count="None"
+                    ).execute()
+                except Exception as e:
+                    print(e)
+        try:
+            client.table("games").update(
+                {"is_finished": True}
+            ).eq("id", self.id_game).execute()
+        except Exception as e:
+            print(e)
+
 
 
 # g=CricketGame(["paul", "max", "jean"])

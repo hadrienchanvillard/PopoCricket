@@ -1,11 +1,27 @@
+import time
 import streamlit as st
 from utils import get_user_list
 from src.game import CricketGame
 
+if "app_loaded" not in st.session_state:
+    st.session_state.app_loaded = False
 
 if "game" not in st.session_state:
-    st.session_state.game_started  = False
-    st.session_state.game_ended    = False
+    st.session_state.game_started = False
+    st.session_state.game_ended = False
+
+if not st.session_state.app_loaded:
+    loading_placeholder = st.empty()
+
+    with loading_placeholder.container():
+        st.write("Chargement de la partie...")
+        progress_bar = st.progress(0)
+        for i in range(100):
+            time.sleep(0.01)
+            progress_bar.progress(i + 1)
+
+        st.session_state.app_loaded = True
+        st.rerun()
 
 user_list = get_user_list()
 start_game_placeholder = st.empty()
@@ -15,8 +31,8 @@ if not st.session_state.game_started:
 
     with start_game_placeholder.container():
         select_players = st.multiselect("Sélectionnez les joueurs:",
-                             options=user_list,
-                             max_selections=6)
+                                        options=user_list,
+                                        max_selections=6)
         start_button = st.button("Commencer la partie", type="primary")
 
     if start_button and len(select_players) >= 2:
@@ -25,7 +41,6 @@ if not st.session_state.game_started:
         st.rerun()
     elif start_button:
         st.write("Il faut au moins deux joueurs pour commencer la partie.")
-
 else:
     game = st.session_state.game
     st.write(f"Tour: {game.get_tour_number()}/20")
@@ -67,4 +82,4 @@ else:
     st.session_state.game_ended = game.game_ended
 
     if st.session_state.game_ended:
-        st.button("Enregistrer la partie", type="primary")
+        st.button("Enregistrer la partie", type="primary", on_click=game.state_to_base())

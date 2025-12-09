@@ -1,5 +1,6 @@
 import streamlit as st
 
+st.title("Popo Cricket")
 
-st.title("Bienvenue sur l'appli")
-st.write("Ceci est la page d'accueil.")
+st.page_link("./pages/Ajouter_un_utilisateur.py", label="Ajouter un utilisateur")
+
