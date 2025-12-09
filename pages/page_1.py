@@ -1,6 +1,10 @@
 import streamlit as st
 
+st.write("Layout forcé - 4 boutons alignés")
 
-options = ["Pomme", "Banane", "Cerise", "Orange"]
-selection = st.multiselect("Choisis tes fruits préférés :", options)
-st.write("Tu as sélectionné :", selection)
+with st.container(horizontal=True):
+
+    st.button("test1", use_container_width=True)
+    st.button("test2", use_container_width=True)
+    st.button("test3", use_container_width=True)
+    st.button("test4", use_container_width=True)

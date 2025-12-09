@@ -2,15 +2,18 @@ import streamlit as st
 from utils import get_user_list
 from src.game import CricketGame
 
-user_list = get_user_list()
 
 if "game" not in st.session_state:
-    st.session_state.game_started = False
+    st.session_state.game_started  = False
+    st.session_state.game_ended    = False
 
-placeholder = st.empty()
+user_list = get_user_list()
+start_game_placeholder = st.empty()
+dart_url = "./assets/dart.png"
 
 if not st.session_state.game_started:
-    with placeholder.container():
+
+    with start_game_placeholder.container():
         select_players = st.multiselect("Sélectionnez les joueurs:",
                              options=user_list,
                              max_selections=6)
@@ -25,6 +28,11 @@ if not st.session_state.game_started:
 
 else:
     game = st.session_state.game
+    st.write(f"Tour: {game.get_tour_number()}/20")
+    with st.container(horizontal=True):
+        for i in range(game.get_num_remaining_darts()):
+            st.image(dart_url, width=30)
+
     state_df, points_df = game.get_df_to_print()
 
     st.dataframe(
@@ -35,28 +43,28 @@ else:
         },
     )
 
-    col20, col19, col18, col17, col16, col15, col25 = st.columns(7)
+    st.dataframe(points_df, hide_index=True)
 
-    with col20:
-        st.button("20", type="secondary", width="stretch", on_click=game.throw, args=["20", 1])
-    with col19:
-        st.button("19", type="secondary", width="stretch", on_click=game.throw, args=["19", 1])
-    with col18:
-        st.button("18", type="secondary", width="stretch", on_click=game.throw, args=["18", 1])
-    with col17:
-        st.button("17", type="secondary", width="stretch", on_click=game.throw, args=["17", 1])
-    with col16:
-        st.button("16", type="secondary", width="stretch", on_click=game.throw, args=["16", 1])
-    with col15:
-        st.button("15", type="secondary", width="stretch", on_click=game.throw, args=["15", 1])
-    with col25:
-        st.button("25", type="secondary", width="stretch", on_click=game.throw, args=["25", 1])
+    container_points_1 = st.container(horizontal=True)
+    with container_points_1:
+        targets = ["20", "19", "18", "17"]
+        for target in targets:
+            st.button(target, use_container_width=True, type="secondary", on_click=game.throw, args=[target])
 
-    double, triple, ret = st.columns(3)
+    container_points_2 = st.container(horizontal=True)
+    with container_points_2:
+        targets = ["16", "15", "Bulle"]
+        for target in targets:
+            target_num = "25" if target == "Bulle" else target
+            st.button(target, use_container_width=True, type="secondary", on_click=game.throw, args=[target_num])
 
-    with double:
-        st.button("Double", type="secondary", width="stretch")
-    with triple:
-        st.button("Triple", type="secondary", width="stretch")
-    with ret:
-        st.button("Retour", type="secondary", width="stretch", on_click=game.return_to_last_state)
+    container_multi = st.container(horizontal=True)
+    with container_multi:
+        st.button("x2", type="secondary", use_container_width=True, on_click=lambda: game.set_multi(2))
+        st.button("x3", type="secondary", use_container_width=True, on_click=lambda: game.set_multi(3))
+        st.button("⬅️", type="secondary", use_container_width=True, on_click=game.return_to_last_state)
+
+    st.session_state.game_ended = game.game_ended
+
+    if st.session_state.game_ended:
+        st.button("Enregistrer la partie", type="primary")
