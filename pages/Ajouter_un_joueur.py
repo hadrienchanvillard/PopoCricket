@@ -2,14 +2,14 @@ import streamlit as st
 from utils import get_client, get_user_list
 
 st.set_page_config(
-    page_title="Ajouter un utilisateur",
+    page_title="Ajouter un joueur",
     page_icon="⛹️",
 )
 
 client = get_client()
 user_list = get_user_list()
 
-new_user_name = st.text_input("Nom de l'utilisateur", placeholder="Neuil")
+new_user_name = st.text_input("Nom de l'joueur", placeholder="Neuil")
 
 if new_user_name:
     if new_user_name not in user_list:

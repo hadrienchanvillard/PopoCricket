@@ -3,6 +3,10 @@ from src.game import CricketGame
 from utils import get_client
 from datetime import datetime
 
+st.set_page_config(
+    page_title="Historique",
+    page_icon="🎮",
+)
 
 client = get_client()
 games = (

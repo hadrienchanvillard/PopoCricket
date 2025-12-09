@@ -3,6 +3,11 @@ import streamlit as st
 from utils import get_user_list
 from src.game import CricketGame
 
+st.set_page_config(
+    page_title="Nouvelle partie",
+    page_icon="🎯️",
+)
+
 if "app_loaded" not in st.session_state:
     st.session_state.app_loaded = False
 
