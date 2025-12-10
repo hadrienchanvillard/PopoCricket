@@ -1,46 +1,97 @@
 import pandas as pd
+from typing import List, Dict, Optional, Tuple
 from importlib import invalidate_caches
-from utils import (get_client, get_player_id, get_player_name, calcul_delta_elo, get_player_elo, get_player_rank,
-                   get_delta_elo)
+import streamlit as st
 
-url_simple = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/simple.png"
-url_double = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/double.png"
-url_triple = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/triple.png"
-url_blank  = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/blank.png"
-
-num_darts_per_round = 3
-num_rounds = 20
-targets = ["20", "19", "18", "17", "16", "15", "25"]
-targets_to_show = ["20", "19", "18", "17", "16", "15", "B"]
-
-def get_icon(n):
-    match n:
-        case 3:
-            return url_triple
-        case 2:
-            return url_double
-        case 1:
-            return url_simple
-        case _:
-            return url_blank
+from utils import (
+    get_client,
+    get_player_id,
+    get_player_name,
+    calcul_delta_elo,
+    get_player_elo,
+    get_player_rank,
+    get_delta_elo
+)
 
 
-def get_state_from_db(match_id):
+class GameConfig:
+    """Configuration centralisée du jeu"""
+    URL_SIMPLE = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/simple.png"
+    URL_DOUBLE = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/double.png"
+    URL_TRIPLE = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/triple.png"
+    URL_BLANK = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/blank.png"
+
+    DARTS_PER_ROUND = 3
+    NUM_ROUNDS = 20
+    TARGETS = ["20", "19", "18", "17", "16", "15", "25"]
+    TARGETS_DISPLAY = ["20", "19", "18", "17", "16", "15", "B"]
+    MAX_SCORE_PER_TARGET = 3
+
+
+def get_icon(score: int) -> str:
+    """
+    Retourne l'URL de l'icône correspondant au score.
+    
+    Args:
+        score: Score du joueur sur une cible (0-3)
+        
+    Returns:
+        URL de l'icône correspondante
+    """
+    icon_map = {
+        3: GameConfig.URL_TRIPLE,
+        2: GameConfig.URL_DOUBLE,
+        1: GameConfig.URL_SIMPLE
+    }
+    return icon_map.get(score, GameConfig.URL_BLANK)
+
+
+def create_match_in_db() -> Optional[int]:
+    """
+    Crée un nouveau match dans la base de données.
+    
+    Returns:
+        ID du match créé, ou None en cas d'erreur
+        
+    Raises:
+        Exception: En cas d'erreur lors de la création
+    """
     client = get_client()
-    response_match_state = (client.table("match_state")
-                           .select("player_id", "target", "score")
-                           .eq("match_id", match_id)
-                           .execute())
+    try:
+        response = client.table("matches").insert(
+            [{"is_finished": False}], count="None"
+        ).execute()
+        return response.data[0]['id']
+    except Exception as e:
+        st.error(f"Erreur lors de la création du match : {e}")
+        raise
+
+
+def get_state_from_db(match_id: int) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Récupère l'état d'un match depuis la base de données.
+    
+    Args:
+        match_id: ID du match à récupérer
+        
+    Returns:
+        Tuple contenant (état du jeu, liste des joueurs)
+    """
+    client = get_client()
+    response_match_state = (
+        client.table("match_state")
+        .select("player_id", "target", "score")
+        .eq("match_id", match_id)
+        .execute()
+    )
 
     player_ids = list({item["player_id"] for item in response_match_state.data})
     player_list = [get_player_name(int(player_id)) for player_id in player_ids]
 
     state = pd.DataFrame(
-            [
-                {name: 0 for name in player_list} for _ in range(7)
-            ],
-            index = targets
-        )
+        [{name: 0 for name in player_list} for _ in range(len(GameConfig.TARGETS))],
+        index=GameConfig.TARGETS
+    )
 
     for data in response_match_state.data:
         state.loc[data["target"], get_player_name(int(data["player_id"]))] = data["score"]
@@ -48,17 +99,27 @@ def get_state_from_db(match_id):
     return state, player_list
 
 
-def get_points_from_db(match_id, player_list):
+def get_points_from_db(match_id: int, player_list: List[str]) -> pd.DataFrame:
+    """
+    Récupère les points des joueurs depuis la base de données.
+    
+    Args:
+        match_id: ID du match
+        player_list: Liste des noms de joueurs
+        
+    Returns:
+        DataFrame contenant les points des joueurs
+    """
     client = get_client()
-    response_player_points = (client.table("match_points")
-                           .select("player_id", "points")
-                           .eq("match_id", match_id)
-                           .execute())
+    response_player_points = (
+        client.table("match_points")
+        .select("player_id", "points")
+        .eq("match_id", match_id)
+        .execute()
+    )
 
     player_points = pd.DataFrame(
-        [
-            {name: int(0) for name in player_list}
-        ],
+        [{name: 0 for name in player_list}],
         index=["points"]
     )
 
@@ -68,265 +129,312 @@ def get_points_from_db(match_id, player_list):
     return player_points
 
 
-def create_match_in_base():
-    client = get_client()
-    try:
-        response = client.table("matches").insert(
-            [{"is_finished": False}], count="None"
-        ).execute()
-        return response.data[0]['id']
-    except Exception as e:
-        print(e)
-
-
 class CricketGame:
+    """
+    Classe représentant une partie de Cricket (jeu de fléchettes).
+    
+    Attributes:
+        id_match: ID unique du match
+        player_list: Liste des noms des joueurs
+        actual_state: État actuel du jeu (scores par cible)
+        player_points: Points actuels des joueurs
+        match_ended: Indicateur de fin de match
+    """
 
-    def __init__(self, player_list=None, match_id=None):
-
+    def __init__(self, player_list: Optional[List[str]] = None, match_id: Optional[int] = None):
+        """
+        Initialise une nouvelle partie ou charge une partie existante.
+        
+        Args:
+            player_list: Liste des joueurs pour une nouvelle partie
+            match_id: ID d'un match existant à charger
+        """
         if player_list:
-
-            self.id_match = create_match_in_base()
-            self.player_list = player_list
-            self.multi = 1
-            self.total_dart_number = len(player_list) * num_darts_per_round * num_rounds
-            self.actual_dart = 1
-
-            self.actual_state = pd.DataFrame(
-                [
-                    {name: 0 for name in player_list} for _ in range(7)
-                ],
-                index = targets
-            )
-            self.player_points = pd.DataFrame(
-                [
-                    {name: int(0) for name in player_list}
-                ],
-                index = ["points"]
-            )
-
-            self.state_history = {}
-            self.points_history = {}
-
-            self.match_ended = False
-
+            self._init_new_game(player_list)
         elif match_id:
-
-            self.id_match = match_id
-            self.actual_state, self.player_list = get_state_from_db(match_id)
-            self.player_points = get_points_from_db(match_id, self.player_list)
-
+            self._load_existing_game(match_id)
         else:
-            pass
+            raise ValueError("Vous devez fournir soit player_list, soit match_id")
 
-    def print_state(self):
-        print(self.actual_state)
-        print(self.player_points)
+    def _init_new_game(self, player_list: List[str]) -> None:
+        """Initialise une nouvelle partie."""
+        self.id_match = create_match_in_db()
+        self.player_list = player_list
+        self.multi = 1
+        self.total_dart_number = (
+                len(player_list) * GameConfig.DARTS_PER_ROUND * GameConfig.NUM_ROUNDS
+        )
+        self.actual_dart = 1
 
-    def get_actual_player(self):
-        len_players = len(self.player_list)
-        player_number = ((self.actual_dart - 1) // num_darts_per_round) % len_players
-        return self.player_list[player_number]
+        self.actual_state = pd.DataFrame(
+            [{name: 0 for name in player_list} for _ in range(len(GameConfig.TARGETS))],
+            index=GameConfig.TARGETS
+        )
 
-    def get_tour_number(self):
+        self.player_points = pd.DataFrame(
+            [{name: 0 for name in player_list}],
+            index=["points"]
+        )
+
+        self.state_history: Dict[str, pd.DataFrame] = {}
+        self.points_history: Dict[str, pd.DataFrame] = {}
+
+        self.match_ended = False
+
+    def _load_existing_game(self, match_id: int) -> None:
+        """Charge une partie existante depuis la base de données."""
+        self.id_match = match_id
+        self.actual_state, self.player_list = get_state_from_db(match_id)
+        self.player_points = get_points_from_db(match_id, self.player_list)
+        self.match_ended = True
+
+    def get_actual_player(self) -> str:
+        """Retourne le nom du joueur actuel."""
+        player_index = ((self.actual_dart - 1) // GameConfig.DARTS_PER_ROUND) % len(self.player_list)
+        return self.player_list[player_index]
+
+    def get_tour_number(self) -> int:
+        """Retourne le numéro du tour actuel."""
         if self.match_ended:
-            return num_rounds
-        return (self.actual_dart - 1)//(len(self.player_list) * num_darts_per_round) + 1
+            return GameConfig.NUM_ROUNDS
+        return (self.actual_dart - 1) // (len(self.player_list) * GameConfig.DARTS_PER_ROUND) + 1
 
-    def get_num_remaining_darts(self):
+    def get_num_remaining_darts(self) -> int:
+        """Retourne le nombre de fléchettes restantes dans le tour."""
         if self.match_ended:
             return 0
-        return 3-((self.actual_dart-1) % 3)
+        return GameConfig.DARTS_PER_ROUND - ((self.actual_dart - 1) % GameConfig.DARTS_PER_ROUND)
 
-    def get_cell(self, player, target):
-        return self.actual_state.loc[target, player]
+    def get_cell(self, player: str, target: str) -> int:
+        """Retourne le score d'un joueur sur une cible."""
+        return int(self.actual_state.loc[target, player])
 
-    def get_points(self, player):
+    def get_points(self, player: str) -> int:
+        """Retourne les points d'un joueur."""
         return int(self.player_points.loc["points", player])
 
-    def get_ranking(self):
+    def get_ranking(self) -> Dict[str, List[str]]:
         """
-        return ex: {"1": ["Alice"], "2": ["Bob", "Tom"]}
+        Retourne le classement actuel des joueurs.
+        
+        Returns:
+            Dictionnaire {rang : [liste de joueurs]}
+            Exemple : {"1" : ["Alice"], "2" : ["Bob", "Tom"]}
         """
-        sorted_pairs = self.player_points.loc["points"].sort_values()
-        classement = {}
-        rang = 1
-        last_value = None
+        sorted_players = self.player_points.loc["points"].sort_values()
 
-        for player, value in sorted_pairs.items():
-            if value != last_value:
-                classement[str(rang)] = [player]
-                last_value = value
-                rang += 1
+        ranking = {}
+        current_rank = 1
+        previous_score = None
+
+        for player, score in sorted_players.items():
+            if score != previous_score:
+                ranking[str(current_rank)] = [player]
+                previous_score = score
+                current_rank += 1
             else:
-                classement[str(rang - 1)].append(player)
+                ranking[str(current_rank - 1)].append(player)
 
-        return classement
+        return ranking
 
-    def get_ranking_to_print(self, for_history=False):
-        result = ""
+    def get_ranking_to_print(self, for_history: bool = False) -> str:
+        """
+        Génère une représentation HTML du classement avec les deltas ELO.
+        
+        Args:
+            for_history: Si True, n'affiche pas l'ELO actuel
+            
+        Returns:
+            Chaîne HTML formatée du classement
+        """
         player_ranking = self.get_ranking()
-        ranks = ["🥇", "🥈", "🥉"] + [str(i) for i in range(4, len(player_ranking) + 1)]
+        medals = ["", "", ""]
+        ranks = medals + [str(i) for i in range(4, len(player_ranking) + 1)]
 
-        new_ranking = {}
-        for rank, players in player_ranking.items():
-            players_with_delta = []
+        result_lines = []
+
+        for rank, (rank_key, players) in zip(ranks, player_ranking.items()):
+            players_formatted = []
+
             for player in players:
                 delta = get_delta_elo(self.id_match, player)
                 sign_delta = f"{delta:+}"
                 color = "green" if delta >= 0 else "red"
-                players_with_delta.append(f"{player} {get_player_elo(player) if not for_history else ''}<span style='color:{color}'>({sign_delta})</span>")
-            new_ranking[rank] = players_with_delta
 
-        for rank, (_, players) in zip(ranks, new_ranking.items()):
-            result += f"{rank}: {', '.join(players)}  \n"
+                elo_display = "" if for_history else f"{get_player_elo(player)} "
+                player_str = f"{player} {elo_display}<span style='color:{color}'>({sign_delta})</span>"
+                players_formatted.append(player_str)
 
-        return result
+            result_lines.append(f"{rank}: {', '.join(players_formatted)}")
 
-    def set_cell(self, player, target, value):
-        self.actual_state.loc[target, player] = value
+        return "  \n".join(result_lines)
 
-    def set_multi(self, m):
-        self.multi = m
-
-    def add_points_to_player(self, player, points):
-        self.player_points.loc["points", player] += int(points)
-
-    def return_to_last_state(self):
-        prev_round_key = str(self.actual_dart - 1)
-        if prev_round_key in self.state_history:
-            self.actual_state = self.state_history[prev_round_key]
-            self.player_points = self.points_history[prev_round_key]
-            self.actual_dart -= 1
-            self.match_ended = False
-
-    def is_player_winning(self, player):
-        if self.actual_state.loc[:, player].tolist() == [3] * 7:
-            player_points = self.player_points.loc["points", player]
-            for other_player in self.player_list:
-                if other_player != player and self.player_points.loc["points", other_player] <= player_points:
-                    return False
-            return True
-        return False
-
-    def check_end_match(self):
-        if self.actual_dart > self.total_dart_number:
-            return True
-
-        for player in self.player_list:
-            if self.is_player_winning(player):
-                return True
-
-        return False
-
-    def throw(self, target):
-        if not self.match_ended:
-            self.state_history[str(self.actual_dart)]  = self.actual_state.copy()
-            self.points_history[str(self.actual_dart)] = self.player_points.copy()
-
-            actual_player = self.get_actual_player()
-
-            if target != "0":
-                # add points to other players
-                if self.get_cell(actual_player, target) + self.multi > 3:
-                    added_points = int((self.get_cell(actual_player, target) + self.multi - 3) * int(target))
-                    for other_player in self.player_list:
-                        if other_player != actual_player and  self.get_cell(other_player, target) < 3:
-                            self.add_points_to_player(other_player, added_points)
-
-                # update actual player score
-                self.set_cell(actual_player, target, min(self.get_cell(actual_player, target) + self.multi, 3))
-
-            self.multi=1
-            self.actual_dart += 1
-            self.match_ended = self.check_end_match()
-
-    def get_df_to_print(self):
-        df_w_icon = pd.DataFrame(
+    def get_df_to_print(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Retourne les DataFrames formatés pour l'affichage Streamlit.
+        
+        Returns:
+            Tuple (DataFrame avec icônes, DataFrame des points)
+        """
+        df_with_icons = pd.DataFrame(
             {
-                player: [get_icon(self.actual_state.loc[target, player]) for target in targets]
+                player: [get_icon(self.get_cell(player, target)) for target in GameConfig.TARGETS]
                 for player in self.player_list
             },
-            index=targets_to_show,
+            index=GameConfig.TARGETS_DISPLAY,
             dtype=object
         )
 
-        return df_w_icon, self.player_points
+        return df_with_icons, self.player_points
 
-    def state_to_base(self):
+    def set_multi(self, multiplier: int) -> None:
+        """Définit le multiplicateur pour le prochain lancer."""
+        if multiplier in [1, 2, 3]:
+            self.multi = multiplier
+        else:
+            raise ValueError("Le multiplicateur doit être 1, 2 ou 3")
+
+    def is_player_winning(self, player: str) -> bool:
+        """
+        Vérifie si un joueur a gagné (toutes les cibles à 3 et le moins de points).
+        
+        Args:
+            player: Nom du joueur à vérifier
+            
+        Returns:
+            True si le joueur a gagné, False sinon
+        """
+        if self.actual_state.loc[:, player].tolist() != [GameConfig.MAX_SCORE_PER_TARGET] * len(GameConfig.TARGETS):
+            return False
+
+        player_score = self.get_points(player)
+        for other_player in self.player_list:
+            if other_player != player:
+                if self.get_points(other_player) <= player_score:
+                    return False
+
+        return True
+
+    def check_end_match(self) -> bool:
+        """Vérifie si le match est terminé."""
+        if self.actual_dart > self.total_dart_number:
+            return True
+
+        return any(self.is_player_winning(player) for player in self.player_list)
+
+    def throw(self, target: str) -> None:
+        """
+        Effectue un lancer sur une cible.
+        
+        Args:
+            target: Cible visée ("20", "19", ..., "25", ou "0" pour raté)
+        """
+        if self.match_ended:
+            return
+
+        self.state_history[str(self.actual_dart)] = self.actual_state.copy()
+        self.points_history[str(self.actual_dart)] = self.player_points.copy()
+
+        actual_player = self.get_actual_player()
+
+        if target != "0":
+            current_score = self.get_cell(actual_player, target)
+            new_score = current_score + self.multi
+
+            if new_score > GameConfig.MAX_SCORE_PER_TARGET:
+                overflow = new_score - GameConfig.MAX_SCORE_PER_TARGET
+                added_points = overflow * int(target)
+
+                for other_player in self.player_list:
+                    if other_player != actual_player and self.get_cell(other_player,
+                                                                       target) < GameConfig.MAX_SCORE_PER_TARGET:
+                        self.player_points.loc["points", other_player] += added_points
+
+            self.actual_state.loc[target, actual_player] = min(new_score, GameConfig.MAX_SCORE_PER_TARGET)
+
+        self.multi = 1
+        self.actual_dart += 1
+        self.match_ended = self.check_end_match()
+
+    def return_to_last_state(self) -> None:
+        """Annule le dernier lancer."""
+        prev_dart_key = str(self.actual_dart - 1)
+
+        if prev_dart_key in self.state_history:
+            self.actual_state = self.state_history[prev_dart_key]
+            self.player_points = self.points_history[prev_dart_key]
+            self.actual_dart -= 1
+            self.match_ended = False
+
+    def state_to_base(self) -> None:
+        """
+        Sauvegarde l'état complet du match dans la base de données.
+        Optimisé avec des insertions groupées (batch inserts).
+        
+        Raises:
+            Exception: En cas d'erreur lors de la sauvegarde
+        """
         client = get_client()
-        for player in self.player_list:
-            player_id = get_player_id(player)
-            points = self.player_points.loc["points", player].item()
 
-            try:
-                client.table("match_points").insert(
-                    [{
-                        "match_id": self.id_match,
-                        "player_id": player_id,
-                        "points": points,
-                    }], count="None"
-                ).execute()
-            except Exception as e:
-                print(e)
-
-            for target in targets:
-                score = self.actual_state.loc[target, player].item()
-
-                try:
-                    client.table("match_state").insert(
-                        [{
-                            "match_id": self.id_match,
-                            "player_id": player_id,
-                            "target": target,
-                            "score": score
-                        }], count="None"
-                    ).execute()
-                except Exception as e:
-                    print(e)
-        try:
-            client.table("matches").update(
-                {"is_finished": True}
-            ).eq("id", self.id_match).execute()
-        except Exception as e:
-            print(e)
+        match_points_data = []
+        match_state_data = []
+        match_ranking_data = []
+        player_updates = []
 
         players_ranking = self.get_ranking()
         deltas_elo = calcul_delta_elo(players_ranking, self.player_list)
 
         for player in self.player_list:
+            player_id = get_player_id(player)
+
+            match_points_data.append({
+                "match_id": self.id_match,
+                "player_id": player_id,
+                "points": int(self.get_points(player)),
+            })
+
+            for target in GameConfig.TARGETS:
+                match_state_data.append({
+                    "match_id": self.id_match,
+                    "player_id": player_id,
+                    "target": target,
+                    "score": int(self.get_cell(player, target))
+                })
+
             old_elo = get_player_elo(player)
             delta_elo = deltas_elo[player]
-            try:
-                client.table("match_ranking").insert(
-                    [{
-                        "match_id": self.id_match,
-                        "player_id": get_player_id(player),
-                        "rank": get_player_rank(players_ranking, player),
-                        "old_elo": old_elo,
-                        "new_elo": old_elo + delta_elo,
-                        "delta_elo": delta_elo
-                    }], count="None"
-                ).execute()
-            except Exception as e:
-                print(e)
+            new_elo = old_elo + delta_elo
 
-            try:
-                (client.
-                 table("players")
-                 .update({"player_elo": old_elo + delta_elo})
-                 .eq("id", get_player_id(player))
-                 .execute())
-            except Exception as e:
-                print(e)
+            match_ranking_data.append({
+                "match_id": self.id_match,
+                "player_id": player_id,
+                "rank": get_player_rank(players_ranking, player),
+                "old_elo": old_elo,
+                "new_elo": new_elo,
+                "delta_elo": delta_elo
+            })
+
+            player_updates.append({"id": player_id, "elo": new_elo})
+
+        try:
+            if match_points_data:
+                client.table("match_points").insert(match_points_data, count="None").execute()
+
+            if match_state_data:
+                client.table("match_state").insert(match_state_data, count="None").execute()
+
+            if match_ranking_data:
+                client.table("match_ranking").insert(match_ranking_data, count="None").execute()
+
+            client.table("matches").update({"is_finished": True}).eq("id", self.id_match).execute()
+
+            for update in player_updates:
+                client.table("players").update({"player_elo": update["elo"]}).eq("id", update["id"]).execute()
 
             invalidate_caches()
 
-# g=CricketGame(["paul", "max", "jean"])
-# g.print_state()
-# for _ in range(4):
-#     g.throw("20")
-# g.print_state()
-# print(g.actual_state.loc[:, "paul"].tolist() == [3]+[0]*7)
-# g.return_to_last_state()
-# g.print_state()
+            st.success("Match sauvegardé avec succès!")
 
+        except Exception as e:
+            st.error(f"Erreur lors de la sauvegarde du match : {e}")
+            raise
