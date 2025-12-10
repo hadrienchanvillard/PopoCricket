@@ -1,26 +1,31 @@
 import streamlit as st
 from st_supabase_connection import SupabaseConnection
+from typing import List, Dict, Optional
 
 
 @st.cache_resource
 def get_client():
+    """Retourne le client Supabase."""
     conn = st.connection("supabase", type=SupabaseConnection)
-    client = conn.client
-    return client
+    return conn.client
 
-def get_player_list():
+
+def get_player_list() -> List[str]:
+    """Retourne la liste des noms de joueurs."""
     client = get_client()
     player_list = client.table("players").select("player_name").execute()
+    return [player["player_name"] for player in player_list.data]
 
-    names = [player["player_name"] for player in player_list.data]
-    return names
 
-def get_leaderbord():
+def get_leaderbord() -> List[Dict]:
+    """Retourne le classement ELO des joueurs."""
     client = get_client()
     return client.table("players").select("player_name", "player_elo").order("player_elo", desc=True).execute().data
 
+
 @st.cache_data
-def get_player_id(player_name: str):
+def get_player_id(player_name: str) -> Optional[int]:
+    """Retourne l'ID d'un joueur à partir de son nom."""
     client = get_client()
     result = (
         client
@@ -29,12 +34,11 @@ def get_player_id(player_name: str):
         .eq("player_name", player_name)
         .execute()
     )
+    return result.data[0]["id"] if result.data else None
 
-    if result.data:
-        return result.data[0]["id"]
-    return None
 
-def get_player_elo(player_name: str):
+def get_player_elo(player_name: str) -> Optional[float]:
+    """Retourne l'ELO actuel d'un joueur."""
     client = get_client()
     result = (
         client
@@ -43,12 +47,12 @@ def get_player_elo(player_name: str):
         .eq("player_name", player_name)
         .execute()
     )
-    if result.data:
-        return float(result.data[0]["player_elo"])
-    return None
+    return float(result.data[0]["player_elo"]) if result.data else None
+
 
 @st.cache_data
-def get_player_name(player_id):
+def get_player_name(player_id: int) -> Optional[str]:
+    """Retourne le nom d'un joueur à partir de son ID."""
     client = get_client()
     result = (
         client
@@ -57,13 +61,12 @@ def get_player_name(player_id):
         .eq("id", player_id)
         .execute()
     )
+    return result.data[0]["player_name"] if result.data else None
 
-    if result.data:
-        return result.data[0]["player_name"]
-    return None
 
 @st.cache_data
-def get_delta_elo(match_id, player):
+def get_delta_elo(match_id: int, player: str) -> Optional[float]:
+    """Retourne la variation d'ELO d'un joueur pour un match donné."""
     client = get_client()
     result = (
         client
@@ -73,38 +76,53 @@ def get_delta_elo(match_id, player):
         .eq("player_id", get_player_id(player))
         .execute()
     )
+    return result.data[0]["delta_elo"] if result.data else None
 
-    if result.data:
-        return result.data[0]["delta_elo"]
-    return None
 
-def get_player_rank(players_ranking, player_name):
+def get_player_rank(players_ranking: Dict[str, List[str]], player_name: str) -> Optional[int]:
+    """Retourne le rang d'un joueur dans un classement donné."""
     for rank, players in players_ranking.items():
-        for player_n in players:
-            if player_name == player_n:
-                return int(rank)
+        if player_name in players:
+            return int(rank)
     return None
 
-def calcul_delta_elo(players_ranking, player_list):
+
+def calcul_delta_elo(players_ranking: Dict[str, List[str]], player_list: List[str]) -> Dict[str, float]:
+    """
+    Calcule les variations d'ELO pour tous les joueurs selon le système ELO.
+
+    Args:
+        players_ranking: Classement des joueurs {rang: [joueurs]}
+        player_list: Liste des joueurs du match
+
+    Returns:
+        Dictionnaire {joueur: delta_elo}
+    """
     result = {}
 
     player_elo_rank = {}
     for player in player_list:
-        player_elo_rank[player] = {"elo": get_player_elo(player), "rank": get_player_rank(players_ranking, player)}
+        player_elo_rank[player] = {
+            "elo": get_player_elo(player),
+            "rank": get_player_rank(players_ranking, player)
+        }
 
     for player in player_list:
         delta = 0
         for other_player in player_list:
             if other_player != player:
-                prob = 1 / (1 + 10**((player_elo_rank[other_player]["elo"] - player_elo_rank[player]["elo"]) / 400))
+                prob = 1 / (1 + 10 ** ((player_elo_rank[other_player]["elo"] - player_elo_rank[player]["elo"]) / 400))
+
                 if player_elo_rank[player]["rank"] < player_elo_rank[other_player]["rank"]:
                     real = 1
                 elif player_elo_rank[player]["rank"] == player_elo_rank[other_player]["rank"]:
                     real = 0.5
                 else:
                     real = 0
+
                 delta += real - prob
+
         delta = round((32 * delta) / (len(player_list) - 1), 2)
         result[player] = delta
-    return result
 
+    return result
