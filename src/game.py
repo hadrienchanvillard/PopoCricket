@@ -248,7 +248,7 @@ class CricketGame:
             Chaîne HTML formatée du classement
         """
         player_ranking = self.get_ranking()
-        medals = ["", "", ""]
+        medals = ["🥇", "🥈", "🥉"]
         ranks = medals + [str(i) for i in range(4, len(player_ranking) + 1)]
 
         result_lines = []
