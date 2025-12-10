@@ -1,6 +1,8 @@
 import time
+from importlib import invalidate_caches
+
 import streamlit as st
-from utils import get_user_list
+from utils import get_player_list
 from src.game import CricketGame
 
 st.set_page_config(
@@ -11,22 +13,22 @@ st.set_page_config(
 if "app_loaded" not in st.session_state:
     st.session_state.app_loaded = False
 
-if "game" not in st.session_state:
-    st.session_state.game_started = False
-    st.session_state.game_ended = False
+if "match" not in st.session_state:
+    st.session_state.match_started = False
+    st.session_state.match_ended = False
 
 if "save_done" not in st.session_state:
     st.session_state.save_done = False
 
-def save_game():
+def save_match():
     game.state_to_base()
     st.session_state.save_done = True
     st.balloons()
 
-def new_game():
+def new_match():
     st.session_state.app_loaded = False
-    st.session_state.game_started = False
-    st.session_state.game_ended = False
+    st.session_state.match_started = False
+    st.session_state.match_ended = False
     st.session_state.save_done = False
 
 if not st.session_state.app_loaded:
@@ -42,26 +44,27 @@ if not st.session_state.app_loaded:
         st.session_state.app_loaded = True
         st.rerun()
 
-user_list = get_user_list()
-start_game_placeholder = st.empty()
+player_list = get_player_list()
+start_match_placeholder = st.empty()
 dart_url = "./assets/dart.png"
 
-if not st.session_state.game_started:
+if not st.session_state.match_started:
 
-    with start_game_placeholder.container():
+    with start_match_placeholder.container():
         select_players = st.multiselect("Sélectionnez les joueurs:",
-                                        options=user_list,
+                                        options=player_list,
                                         max_selections=6)
         start_button = st.button("Commencer la partie", type="primary")
 
     if start_button and len(select_players) >= 2:
-        st.session_state.game = CricketGame(player_list=select_players)
-        st.session_state.game_started = True
+        st.session_state.match = CricketGame(player_list=select_players)
+        st.session_state.match_started = True
+        invalidate_caches()
         st.rerun()
     elif start_button:
         st.write("Il faut au moins deux joueurs pour commencer la partie.")
 else:
-    game = st.session_state.game
+    game = st.session_state.match
     st.write(f"Tour: {game.get_tour_number()}/20")
     with st.container(horizontal=True):
         for i in range(game.get_num_remaining_darts()):
@@ -73,7 +76,7 @@ else:
         state_df,
         column_config={
             name: st.column_config.ImageColumn(name)
-            for name in user_list
+            for name in player_list
         },
     )
 
@@ -98,18 +101,20 @@ else:
         st.button("x3", type="secondary", use_container_width=True, on_click=lambda: game.set_multi(3))
         st.button("⬅️", type="secondary", use_container_width=True, on_click=game.return_to_last_state)
 
-    st.session_state.game_ended = game.game_ended
+    st.session_state.match_ended = game.match_ended
 
-    if st.session_state.game_ended:
+    if st.session_state.match_ended:
         with st.container(horizontal=True):
             st.button(
                 "Enregistrer la partie",
                 type="primary",
-                on_click=save_game,
+                on_click=save_match,
                 disabled=st.session_state.save_done
             )
             st.button(
                 "Nouvelle Partie",
                 type="secondary",
-                on_click=new_game
+                on_click=new_match
             )
+        if st.session_state.save_done:
+            st.markdown(game.get_ranking_to_print(), unsafe_allow_html=True)

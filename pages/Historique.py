@@ -9,9 +9,9 @@ st.set_page_config(
 )
 
 client = get_client()
-games = (
+matches = (
     client
-    .table("games")
+    .table("matches")
     .select("id", "created_at")
     .eq("is_finished", True)
     .order("created_at", desc=True)
@@ -19,20 +19,22 @@ games = (
     .execute()
 )
 
-for game_info in games.data:
+for match_info in matches.data:
 
-    game_id = game_info["id"]
-    date = datetime.fromisoformat(game_info['created_at'])
+    match = match_info["id"]
+    date = datetime.fromisoformat(match_info['created_at'])
 
     st.write(f"Date: {date.strftime('%d/%m/%Y %H:%M')}")
 
-    game = CricketGame(game_id=game_id)
-    state_df, points_df = game.get_df_to_print()
+    match = CricketGame(match_id=match)
+    state_df, points_df = match.get_df_to_print()
     st.dataframe(
         state_df,
         column_config={
-            name: st.column_config.ImageColumn(name)
-            for name in game.player_list
+            player: st.column_config.ImageColumn(player)
+            for player in match.player_list
         },
     )
     st.dataframe(points_df, hide_index=True)
+
+    st.markdown(match.get_ranking_to_print(for_history=True), unsafe_allow_html=True)

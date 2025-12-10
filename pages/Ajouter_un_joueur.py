@@ -1,5 +1,5 @@
 import streamlit as st
-from utils import get_client, get_user_list
+from utils import get_client, get_player_list
 
 st.set_page_config(
     page_title="Ajouter un joueur",
@@ -7,15 +7,15 @@ st.set_page_config(
 )
 
 client = get_client()
-user_list = get_user_list()
+player_list = get_player_list()
 
-new_user_name = st.text_input("Nom de l'joueur", placeholder="Neuil")
+new_player_name = st.text_input("Nom de l'joueur", placeholder="Neuil")
 
-if new_user_name:
-    if new_user_name not in user_list:
+if new_player_name:
+    if new_player_name not in player_list:
         try:
-            response = client.table("users").insert(
-                [{"user_name": new_user_name}], count="None"
+            response = client.table("players").insert(
+                [{"player_name": new_player_name}], count="None"
             ).execute()
             st.success("Joueur ajouté avec succès.")
         except Exception as e:

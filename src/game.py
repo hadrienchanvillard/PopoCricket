@@ -1,5 +1,7 @@
 import pandas as pd
-from utils import get_client, get_user_id, get_user_name
+from importlib import invalidate_caches
+from utils import (get_client, get_player_id, get_player_name, calcul_delta_elo, get_player_elo, get_player_rank,
+                   get_delta_elo)
 
 url_simple = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/simple.png"
 url_double = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/cricket%20icons/double.png"
@@ -9,6 +11,7 @@ url_blank  = "https://jjdotprdoyufgsvcgnky.supabase.co/storage/v1/object/public/
 num_darts_per_round = 3
 num_rounds = 20
 targets = ["20", "19", "18", "17", "16", "15", "25"]
+targets_to_show = ["20", "19", "18", "17", "16", "15", "B"]
 
 def get_icon(n):
     match n:
@@ -22,15 +25,15 @@ def get_icon(n):
             return url_blank
 
 
-def get_state_from_db(game_id):
+def get_state_from_db(match_id):
     client = get_client()
-    response_game_state = (client.table("game_state_history")
+    response_match_state = (client.table("match_state")
                            .select("player_id", "target", "score")
-                           .eq("game_id", game_id)
+                           .eq("match_id", match_id)
                            .execute())
 
-    player_ids = list({item["player_id"] for item in response_game_state.data})
-    player_list = [get_user_name(int(user_id)) for user_id in player_ids]
+    player_ids = list({item["player_id"] for item in response_match_state.data})
+    player_list = [get_player_name(int(player_id)) for player_id in player_ids]
 
     state = pd.DataFrame(
             [
@@ -39,17 +42,17 @@ def get_state_from_db(game_id):
             index = targets
         )
 
-    for data in response_game_state.data:
-        state.loc[data["target"], get_user_name(int(data["player_id"]))] = data["score"]
+    for data in response_match_state.data:
+        state.loc[data["target"], get_player_name(int(data["player_id"]))] = data["score"]
 
     return state, player_list
 
 
-def get_points_from_db(game_id, player_list):
+def get_points_from_db(match_id, player_list):
     client = get_client()
-    response_player_points = (client.table("game_points_history")
+    response_player_points = (client.table("match_points")
                            .select("player_id", "points")
-                           .eq("game_id", game_id)
+                           .eq("match_id", match_id)
                            .execute())
 
     player_points = pd.DataFrame(
@@ -60,28 +63,29 @@ def get_points_from_db(game_id, player_list):
     )
 
     for data in response_player_points.data:
-        player_points.loc["points", get_user_name(int(data["player_id"]))] = data["points"]
+        player_points.loc["points", get_player_name(int(data["player_id"]))] = data["points"]
 
     return player_points
 
 
+def create_match_in_base():
+    client = get_client()
+    try:
+        response = client.table("matches").insert(
+            [{"is_finished": False}], count="None"
+        ).execute()
+        return response.data[0]['id']
+    except Exception as e:
+        print(e)
+
+
 class CricketGame:
 
-    def create_game_in_base(self):
-        client = get_client()
-        try:
-            response = client.table("games").insert(
-                [{"is_finished": False}], count="None"
-            ).execute()
-            return response.data[0]['id']
-        except Exception as e:
-            print(e)
-
-    def __init__(self, player_list=None, game_id=None):
+    def __init__(self, player_list=None, match_id=None):
 
         if player_list:
 
-            self.id_game = self.create_game_in_base()
+            self.id_match = create_match_in_base()
             self.player_list = player_list
             self.multi = 1
             self.total_dart_number = len(player_list) * num_darts_per_round * num_rounds
@@ -103,12 +107,13 @@ class CricketGame:
             self.state_history = {}
             self.points_history = {}
 
-            self.game_ended = False
+            self.match_ended = False
 
-        elif game_id:
+        elif match_id:
 
-            self.actual_state, self.player_list = get_state_from_db(game_id)
-            self.player_points = get_points_from_db(game_id, self.player_list)
+            self.id_match = match_id
+            self.actual_state, self.player_list = get_state_from_db(match_id)
+            self.player_points = get_points_from_db(match_id, self.player_list)
 
         else:
             pass
@@ -123,12 +128,12 @@ class CricketGame:
         return self.player_list[player_number]
 
     def get_tour_number(self):
-        if self.game_ended:
+        if self.match_ended:
             return num_rounds
         return (self.actual_dart - 1)//(len(self.player_list) * num_darts_per_round) + 1
 
     def get_num_remaining_darts(self):
-        if self.game_ended:
+        if self.match_ended:
             return 0
         return 3-((self.actual_dart-1) % 3)
 
@@ -137,6 +142,45 @@ class CricketGame:
 
     def get_points(self, player):
         return int(self.player_points.loc["points", player])
+
+    def get_ranking(self):
+        """
+        return ex: {"1": ["Alice"], "2": ["Bob", "Tom"]}
+        """
+        sorted_pairs = self.player_points.loc["points"].sort_values()
+        classement = {}
+        rang = 1
+        last_value = None
+
+        for player, value in sorted_pairs.items():
+            if value != last_value:
+                classement[str(rang)] = [player]
+                last_value = value
+                rang += 1
+            else:
+                classement[str(rang - 1)].append(player)
+
+        return classement
+
+    def get_ranking_to_print(self, for_history=False):
+        result = ""
+        player_ranking = self.get_ranking()
+        ranks = ["🥇", "🥈", "🥉"] + [str(i) for i in range(4, len(player_ranking) + 1)]
+
+        new_ranking = {}
+        for rank, players in player_ranking.items():
+            players_with_delta = []
+            for player in players:
+                delta = get_delta_elo(self.id_match, player)
+                sign_delta = f"{delta:+}"
+                color = "green" if delta >= 0 else "red"
+                players_with_delta.append(f"{player} {get_player_elo(player) if not for_history else ''}<span style='color:{color}'>({sign_delta})</span>")
+            new_ranking[rank] = players_with_delta
+
+        for rank, (_, players) in zip(ranks, new_ranking.items()):
+            result += f"{rank}: {', '.join(players)}  \n"
+
+        return result
 
     def set_cell(self, player, target, value):
         self.actual_state.loc[target, player] = value
@@ -153,7 +197,7 @@ class CricketGame:
             self.actual_state = self.state_history[prev_round_key]
             self.player_points = self.points_history[prev_round_key]
             self.actual_dart -= 1
-            self.game_ended = False
+            self.match_ended = False
 
     def is_player_winning(self, player):
         if self.actual_state.loc[:, player].tolist() == [3] * 7:
@@ -164,7 +208,7 @@ class CricketGame:
             return True
         return False
 
-    def check_end_game(self):
+    def check_end_match(self):
         if self.actual_dart > self.total_dart_number:
             return True
 
@@ -175,7 +219,7 @@ class CricketGame:
         return False
 
     def throw(self, target):
-        if not self.game_ended:
+        if not self.match_ended:
             self.state_history[str(self.actual_dart)]  = self.actual_state.copy()
             self.points_history[str(self.actual_dart)] = self.player_points.copy()
 
@@ -194,7 +238,7 @@ class CricketGame:
 
             self.multi=1
             self.actual_dart += 1
-            self.game_ended = self.check_end_game()
+            self.match_ended = self.check_end_match()
 
     def get_df_to_print(self):
         df_w_icon = pd.DataFrame(
@@ -202,7 +246,7 @@ class CricketGame:
                 player: [get_icon(self.actual_state.loc[target, player]) for target in targets]
                 for player in self.player_list
             },
-            index=targets,
+            index=targets_to_show,
             dtype=object
         )
 
@@ -211,13 +255,13 @@ class CricketGame:
     def state_to_base(self):
         client = get_client()
         for player in self.player_list:
-            player_id = get_user_id(player)
+            player_id = get_player_id(player)
             points = self.player_points.loc["points", player].item()
 
             try:
-                client.table("game_points_history").insert(
+                client.table("match_points").insert(
                     [{
-                        "game_id": self.id_game,
+                        "match_id": self.id_match,
                         "player_id": player_id,
                         "points": points,
                     }], count="None"
@@ -229,9 +273,9 @@ class CricketGame:
                 score = self.actual_state.loc[target, player].item()
 
                 try:
-                    client.table("game_state_history").insert(
+                    client.table("match_state").insert(
                         [{
-                            "game_id": self.id_game,
+                            "match_id": self.id_match,
                             "player_id": player_id,
                             "target": target,
                             "score": score
@@ -240,12 +284,42 @@ class CricketGame:
                 except Exception as e:
                     print(e)
         try:
-            client.table("games").update(
+            client.table("matches").update(
                 {"is_finished": True}
-            ).eq("id", self.id_game).execute()
+            ).eq("id", self.id_match).execute()
         except Exception as e:
             print(e)
 
+        players_ranking = self.get_ranking()
+        deltas_elo = calcul_delta_elo(players_ranking, self.player_list)
+
+        for player in self.player_list:
+            old_elo = get_player_elo(player)
+            delta_elo = deltas_elo[player]
+            try:
+                client.table("match_ranking").insert(
+                    [{
+                        "match_id": self.id_match,
+                        "player_id": get_player_id(player),
+                        "rank": get_player_rank(players_ranking, player),
+                        "old_elo": old_elo,
+                        "new_elo": old_elo + delta_elo,
+                        "delta_elo": delta_elo
+                    }], count="None"
+                ).execute()
+            except Exception as e:
+                print(e)
+
+            try:
+                (client.
+                 table("players")
+                 .update({"player_elo": old_elo + delta_elo})
+                 .eq("id", get_player_id(player))
+                 .execute())
+            except Exception as e:
+                print(e)
+
+            invalidate_caches()
 
 # g=CricketGame(["paul", "max", "jean"])
 # g.print_state()
