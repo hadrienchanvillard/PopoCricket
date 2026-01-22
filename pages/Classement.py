@@ -7,11 +7,13 @@ st.set_page_config(
     page_icon="🏅",
 )
 
-leadeboard_data = get_leaderbord()
+leaderboard_data = get_leaderbord()
+index_leaderboard = (["🥇", "🥈", "🥉"] + [str(i) for i in range(4, len(leaderboard_data)+1)])[:len(leaderboard_data)]
 
 leaderboard = pd.DataFrame(
-    leadeboard_data,
-    index=["🥇", "🥈", "🥉"] + [str(i) for i in range(4, len(leadeboard_data)+1)]
+    leaderboard_data,
+    index=index_leaderboard,
+    columns=["Joueur","Score"]
 )
-leaderboard.columns = ["Joueur", "Score"]
+
 st.dataframe(leaderboard)
