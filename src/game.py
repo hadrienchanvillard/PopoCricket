@@ -128,6 +128,20 @@ def get_points_from_db(match_id: int, player_list: List[str]) -> pd.DataFrame:
 
     return player_points
 
+def get_marks_from_db(match_id: int) -> list:
+    client = get_client()
+    response_player_points = (
+        client.table("match_marks")
+        .select("marks")
+        .eq("match_id", match_id)
+        .execute()
+    )
+
+    try:
+        return response_player_points.data[0]["marks"]
+    except IndexError:
+        return [0]*20
+
 
 class CricketGame:
     """
@@ -176,6 +190,8 @@ class CricketGame:
             index=["points"]
         )
 
+        self.marks = []
+
         self.state_history: Dict[str, pd.DataFrame] = {}
         self.points_history: Dict[str, pd.DataFrame] = {}
 
@@ -187,16 +203,20 @@ class CricketGame:
         self.actual_state, self.player_list = get_state_from_db(match_id)
         self.player_points = get_points_from_db(match_id, self.player_list)
         self.match_ended = True
+        self.marks = get_marks_from_db(match_id)
 
-    def get_actual_player(self) -> str:
+    def get_actual_player(self, dart=None) -> str:
         """Retourne le nom du joueur actuel."""
-        player_index = ((self.actual_dart - 1) // GameConfig.DARTS_PER_ROUND) % len(self.player_list)
+
+        if dart is None:
+            dart = self.actual_dart
+        player_index = ((dart - 1) // GameConfig.DARTS_PER_ROUND) % len(self.player_list)
         return self.player_list[player_index]
 
     def get_tour_number(self) -> int:
         """Retourne le numéro du tour actuel."""
         if self.match_ended:
-            return GameConfig.NUM_ROUNDS
+            return len(self.marks) // (GameConfig.DARTS_PER_ROUND*len(self.player_list)) + 1
         return (self.actual_dart - 1) // (len(self.player_list) * GameConfig.DARTS_PER_ROUND) + 1
 
     def get_num_remaining_darts(self) -> int:
@@ -212,6 +232,17 @@ class CricketGame:
     def get_points(self, player: str) -> int:
         """Retourne les points d'un joueur."""
         return int(self.player_points.loc["points", player])
+
+    def get_mprs(self):
+
+        res = {player: 0 for player in self.player_list}
+
+        for i in range(len(self.marks)):
+            player = self.get_actual_player(i+1)
+            res[player] += self.marks[i]
+
+        return {k:v/self.get_tour_number() for k,v in res.items()}
+
 
     def get_ranking(self) -> Dict[str, List[str]]:
         """
@@ -250,6 +281,7 @@ class CricketGame:
         player_ranking = self.get_ranking()
         medals = ["🥇", "🥈", "🥉"]
         ranks = medals + [str(i) for i in range(4, len(player_ranking) + 1)]
+        mprs=self.get_mprs()
 
         result_lines = []
 
@@ -262,7 +294,7 @@ class CricketGame:
                 color = "green" if delta >= 0 else "red"
 
                 elo_display = "" if for_history else f"{get_player_elo(player)} "
-                player_str = f"{player} {elo_display}<span style='color:{color}'>({sign_delta})</span>"
+                player_str = f"{player} {elo_display}<span style='color:{color}'>({sign_delta})</span> MPR: {mprs[player]:.2f}"
                 players_formatted.append(player_str)
 
             result_lines.append(f"{rank}: {', '.join(players_formatted)}")
@@ -329,6 +361,7 @@ class CricketGame:
         Args:
             target: Cible visée ("20", "19", ..., "25", ou "0" pour raté)
         """
+        is_mark = False
         if self.match_ended:
             return
 
@@ -349,8 +382,13 @@ class CricketGame:
                     if other_player != actual_player and self.get_cell(other_player,
                                                                        target) < GameConfig.MAX_SCORE_PER_TARGET:
                         self.player_points.loc["points", other_player] += added_points
+                        is_mark = True
+            else:
+                is_mark = True
 
             self.actual_state.loc[target, actual_player] = min(new_score, GameConfig.MAX_SCORE_PER_TARGET)
+
+        self.marks.append(self.multi if is_mark else 0)
 
         self.multi = 1
         self.actual_dart += 1
@@ -365,6 +403,7 @@ class CricketGame:
             self.player_points = self.points_history[prev_dart_key]
             self.actual_dart -= 1
             self.match_ended = False
+            self.marks.pop()
 
     def state_to_base(self) -> None:
         """
@@ -379,6 +418,7 @@ class CricketGame:
         match_points_data = []
         match_state_data = []
         match_ranking_data = []
+        match_marks_data = [{"match_id": self.id_match, "marks": self.marks}]
         player_updates = []
 
         players_ranking = self.get_ranking()
@@ -425,6 +465,9 @@ class CricketGame:
 
             if match_ranking_data:
                 client.table("match_ranking").insert(match_ranking_data, count="None").execute()
+
+            if match_marks_data:
+                client.table("match_marks").insert(match_marks_data, count="None").execute()
 
             client.table("matches").update({"is_finished": True}).eq("id", self.id_match).execute()
 
